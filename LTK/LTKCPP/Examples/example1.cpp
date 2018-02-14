@@ -85,10 +85,21 @@ public:
     deleteAllROSpecs(void);
 
     int
+    deleteAllAcessSpecs(void);
+
+    int
     addROSpec(void);
+    
+/* ALG 02.02.18 */   
+    int
+    addAccessSpec(void);
 
     int
     enableROSpec(void);
+    
+/* ALG 02.02.18 */    
+    int
+    enableAccessSpec(void);
 
     int
     startROSpec(void);
@@ -262,10 +273,20 @@ usage(
  **     - Make sure the connection status is good
  **     - Clear (scrub) the reader configuration
  **     - Configure for what we want to do
- **     - Run inventory operation 5 times
+ **     - Run inventory operation N times
  **     - Again, clear (scrub) the reader configuration
  **     - Disconnect from reader
  **     - Destruct connection
+ 
+ ** FIX!!
+ 
+ ** 6. ADD_ROSPEC to instruct the Reader to perform an inventory. Include tag ﬁlters to reduceunwanted reads from other RFID applications
+ ** 7. ADD_ACCESSSPEC to instruct the Reader to read user memory for personnel tags.
+ ** 8. ENABLE_ROSPEC
+ ** 9. ENABLE_ACCESSSPEC
+ 
+ 
+ 
  **
  ** @param[in]  pReaderHostName String with reader name
  **
@@ -287,6 +308,7 @@ CMyApplication::run(
     CTypeRegistry * pTypeRegistry;
     CConnection * pConn;
     int rc;
+    int count = 2; /* ALG 02.02.18 */
 
     /*
      * Allocate the type registry. This is needed
@@ -346,12 +368,17 @@ CMyApplication::run(
             rc = 3;
             if (0 == addROSpec()) {
                 rc = 4;
+                
+                addAccessSpec();
+                
                 if (0 == enableROSpec()) {
                     int i;
+                    
+                    enableAccessSpec();
 
                     rc = 5;
 
-                    for (i = 1; i <= 5; i++) {
+                    for (i = 1; i <= count; i++) {
                         printf("INFO: Starting run %d ================\n", i);
                         if (0 != startROSpec()) {
                             /* already tattled */
@@ -363,7 +390,7 @@ CMyApplication::run(
                         }
                     }
 
-                    if (5 == i) {
+                    if (count == i) {
                         rc = 0;
                     }
                 }
@@ -538,6 +565,10 @@ CMyApplication::scrubConfiguration(void) {
         return -2;
     }
 
+    if (0 != deleteAllAcessSpecs())  {
+        return -2;
+    }
+
     return 0;
 }
 
@@ -707,6 +738,72 @@ CMyApplication::deleteAllROSpecs(void) {
     return 0;
 }
 
+int
+CMyApplication::deleteAllAcessSpecs(void) {
+    CDELETE_ACCESSSPEC * pCmd;
+    CMessage * pRspMsg;
+    CDELETE_ACCESSSPEC_RESPONSE * pRsp;
+
+    /*
+     * Compose the command message
+     */
+    pCmd = new CDELETE_ACCESSSPEC();
+    pCmd->setMessageID(1102);
+    pCmd->setAccessSpecID(0); /* All */
+
+    /*
+     * Send the message, expect the response of certain type
+     */
+    pRspMsg = transact(pCmd);
+
+    /*
+     * Done with the command message
+     */
+    delete pCmd;
+
+    /*
+     * transact() returns NULL if something went wrong.
+     */
+    if (NULL == pRspMsg) {
+        /* transact already tattled */
+        return -1;
+    }
+
+    /*
+     * Cast to a DELETE_ROSPEC_RESPONSE message.
+     */
+    pRsp = (CDELETE_ACCESSSPEC_RESPONSE *) pRspMsg;
+
+    /*
+     * Check the LLRPStatus parameter.
+     */
+    if (0 != checkLLRPStatus(pRsp->getLLRPStatus(), "deleteAllAcessSpecs")) {
+        /* checkLLRPStatus already tattled */
+        delete pRspMsg;
+        return -1;
+    }
+
+    /*
+     * Done with the response message.
+     */
+    delete pRspMsg;
+
+    /*
+     * Tattle progress, maybe
+     */
+    if (m_Verbose) {
+        printf("INFO: All AccessSpecs are deleted\n");
+    }
+
+    /*
+     * Victory.
+     */
+    return 0;
+}
+
+
+
+
 /**
  *****************************************************************************
  **
@@ -813,6 +910,7 @@ CMyApplication::addROSpec(void) {
 
     CTagReportContentSelector * pTagReportContentSelector =
             new CTagReportContentSelector();
+    /* original         
     pTagReportContentSelector->setEnableROSpecID(FALSE);
     pTagReportContentSelector->setEnableSpecIndex(FALSE);
     pTagReportContentSelector->setEnableInventoryParameterSpecID(FALSE);
@@ -823,6 +921,26 @@ CMyApplication::addROSpec(void) {
     pTagReportContentSelector->setEnableLastSeenTimestamp(FALSE);
     pTagReportContentSelector->setEnableTagSeenCount(FALSE);
     pTagReportContentSelector->setEnableAccessSpecID(FALSE);
+    */
+    
+    /* from llrp-init.xml */
+    pTagReportContentSelector->setEnableROSpecID(TRUE);
+    pTagReportContentSelector->setEnableSpecIndex(FALSE);
+    pTagReportContentSelector->setEnableInventoryParameterSpecID(FALSE);
+    pTagReportContentSelector->setEnableAntennaID(FALSE);
+    pTagReportContentSelector->setEnableChannelIndex(FALSE);
+    pTagReportContentSelector->setEnablePeakRSSI(TRUE);
+    pTagReportContentSelector->setEnableFirstSeenTimestamp(TRUE);
+    pTagReportContentSelector->setEnableLastSeenTimestamp(TRUE);
+    pTagReportContentSelector->setEnableTagSeenCount(TRUE);
+
+    CC1G2EPCMemorySelector *pC1G2Mem = new CC1G2EPCMemorySelector();
+    pC1G2Mem->setEnableCRC(FALSE);
+    pC1G2Mem->setEnablePCBits(FALSE);
+    pTagReportContentSelector->addAirProtocolEPCMemorySelector(pC1G2Mem);
+
+    pTagReportContentSelector->setEnableAccessSpecID(TRUE);
+    
 
     CROReportSpec * pROReportSpec = new CROReportSpec();
     pROReportSpec->setROReportTrigger(
@@ -903,6 +1021,127 @@ CMyApplication::addROSpec(void) {
      */
     return 0;
 }
+
+
+int
+CMyApplication::addAccessSpec(void) {
+    CADD_ACCESSSPEC * pCmd;
+    CMessage * pRspMsg;
+    CADD_ACCESSSPEC_RESPONSE * pRsp;
+    pCmd = new CADD_ACCESSSPEC();
+    pCmd->setMessageID(210);
+    
+    /* build the C1G2Target Tag with the AccessSpec filter */
+    CC1G2TargetTag *ptargetTag = new CC1G2TargetTag();
+    ptargetTag->setMatch(true);
+    ptargetTag->setMB(1);
+    ptargetTag->setPointer(16);
+
+    llrp_u1v_t tagData = llrp_u1v_t(24);
+    tagData.m_nBit = 24;
+    tagData.m_pValue[0] = 0x00;
+    tagData.m_pValue[1] = 0x00;
+    tagData.m_pValue[2] = 0x00;
+
+    ptargetTag->setTagData(tagData);
+    llrp_u1v_t tagMask = llrp_u1v_t(24);
+    tagMask.m_nBit = 24;
+    tagMask.m_pValue[0] = 0xff;
+    tagMask.m_pValue[1] = 0xff;
+    tagMask.m_pValue[2] = 0xff;
+   
+    /* build the AirProtocolTagSpec Add the filter */
+    CC1G2TagSpec *ptagSpec = new CC1G2TagSpec();
+    ptagSpec->addC1G2TargetTag(ptargetTag);
+    
+    /* Build the read Op Spec */
+    CC1G2Read *pread = new CC1G2Read();
+    pread->setAccessPassword(0);
+    pread->setMB(3);
+    pread->setOpSpecID(111);
+    // 10x16-bit values
+    pread->setWordCount(10);
+    pread->setWordPointer(0);
+    
+    /* Create the AccessCommand. Add the TagSpec and the OpSpec */
+    CAccessCommand *pAccessCommand = new CAccessCommand();
+    pAccessCommand->setAirProtocolTagSpec(ptagSpec);
+    pAccessCommand->addAccessCommandOpSpec(pread);
+    
+    /* set up the Access Report Spec rule to report only with ROSpecs */
+    CAccessReportSpec *pAccessReportSpec = new CAccessReportSpec();
+    pAccessReportSpec->setAccessReportTrigger(
+    AccessReportTriggerType_Whenever_ROReport_Is_Generated);
+    
+    /* set up the stop trigger for the access spec. Do not stop */
+    CAccessSpecStopTrigger *pAccessStopTrigger = new CAccessSpecStopTrigger();
+    pAccessStopTrigger->setAccessSpecStopTrigger(AccessSpecStopTriggerType_Null);
+    pAccessStopTrigger->setOperationCountValue(0); /* ignored */
+    /* Create and configure the AccessSpec */
+    CAccessSpec *pAccessSpec = new CAccessSpec();
+    pAccessSpec->setAccessSpecID(23);
+    pAccessSpec->setAntennaID(0); /* valid for all antennas */
+    pAccessSpec->setCurrentState(AccessSpecState_Disabled);
+    pAccessSpec->setProtocolID(AirProtocols_EPCGlobalClass1Gen2);
+    pAccessSpec->setROSpecID(123); /* valid for All RoSpecs */
+    pAccessSpec->setAccessSpecStopTrigger(pAccessStopTrigger);
+    pAccessSpec->setAccessReportSpec(pAccessReportSpec);
+    pAccessSpec->setAccessCommand(pAccessCommand);
+    /* Add the AccessSpec to the ADD_ACCESS_SPEC message */
+    pCmd->setAccessSpec(pAccessSpec);
+    
+    /*
+     * Send the message, expect the response of certain type
+     */
+    pRspMsg = transact(pCmd);
+
+    /*
+     * Done with the command message.
+     * N.B.: And the parameters
+     */
+    delete pCmd;
+
+    /*
+     * transact() returns NULL if something went wrong.
+     */
+    if (NULL == pRspMsg) {
+        /* transact already tattled */
+        return -1;
+    }
+
+    /*
+     * Cast to a CADD_ACCESSSPEC_RESPONSE message.
+     */
+    pRsp = (CADD_ACCESSSPEC_RESPONSE *) pRspMsg;
+
+    /*
+     * Check the LLRPStatus parameter.
+     */
+    if (0 != checkLLRPStatus(pRsp->getLLRPStatus(), "addAccessSpec")) {
+        /* checkLLRPStatus already tattled */
+        delete pRspMsg;
+        return -1;
+    }
+
+    /*
+     * Done with the response message.
+     */
+    delete pRspMsg;
+
+    /*
+     * Tattle progress, maybe
+     */
+    if (m_Verbose) {
+        printf("INFO: AccessSpec added\n");
+    }
+
+    /*
+     * Victory.
+     */
+    return 0;
+}
+
+
 
 /**
  *****************************************************************************
@@ -987,6 +1226,88 @@ CMyApplication::enableROSpec(void) {
 /**
  *****************************************************************************
  **
+ ** @brief  Enable our AccessSpec using ENABLE_ACCESSSPEC message
+ **
+ ** Enable the ROSpec that was added above.
+ **
+ ** The message we send is:
+ **     <ENABLE_ACCESSSPEC MessageID='212'>
+ **       <AccessSpecID>23</AccessSpecID>
+ **     </ENABLE_ACCESSSPEC>
+ **
+ ** @return     ==0             Everything OK
+ **             !=0             Something went wrong
+ **
+ *****************************************************************************/
+
+int
+CMyApplication::enableAccessSpec(void) {
+    CENABLE_ACCESSSPEC * pCmd;
+    CMessage * pRspMsg;
+    CENABLE_ACCESSSPEC_RESPONSE * pRsp;
+
+    /*
+     * Compose the command message
+     */
+    pCmd = new CENABLE_ACCESSSPEC();
+    pCmd->setMessageID(212);
+    pCmd->setAccessSpecID(23);
+    
+    /*
+     * Send the message, expect the response of certain type
+     */
+    pRspMsg = transact(pCmd);
+
+    /*
+     * Done with the command message
+     */
+    delete pCmd;
+
+    /*
+     * transact() returns NULL if something went wrong.
+     */
+    if (NULL == pRspMsg) {
+        /* transact already tattled */
+        return -1;
+    }
+
+    /*
+     * Cast to CENABLE_ACCESSSPEC_RESPONSE message.
+     */
+    pRsp = (CENABLE_ACCESSSPEC_RESPONSE *) pRspMsg;
+
+    /*
+     * Check the LLRPStatus parameter.
+     */
+    if (0 != checkLLRPStatus(pRsp->getLLRPStatus(), "enableAccessSpec")) {
+        /* checkLLRPStatus already tattled */
+        delete pRspMsg;
+        return -1;
+    }
+
+    /*
+     * Done with the response message.
+     */
+    delete pRspMsg;
+
+    /*
+     * Tattle progress, maybe
+     */
+    if (m_Verbose) {
+        printf("INFO: AccessSpec enabled\n");
+    }
+
+    /*
+     * Victory.
+     */
+    return 0;
+}
+
+
+
+/**
+ *****************************************************************************
+ **
  ** @brief  Start our ROSpec using START_ROSPEC message
  **
  ** Start the ROSpec that was added above.
@@ -1013,6 +1334,7 @@ CMyApplication::startROSpec(void) {
     pCmd = new CSTART_ROSPEC();
     pCmd->setMessageID(202);
     pCmd->setROSpecID(123);
+
 
     /*
      * Send the message, expect the response of certain type
@@ -1219,6 +1541,9 @@ CMyApplication::printOneTagReportData(
         CTagReportData * pTagReportData) {
     const CTypeDescriptor * pType;
     char aBuf[64];
+    char bBuf[64];
+    std::list<CParameter *>::iterator OpSpecResults;
+
 
     /*
      * Print the EPC. It could be an 96-bit EPC_96 parameter
@@ -1266,7 +1591,35 @@ CMyApplication::printOneTagReportData(
     } else {
         strcpy(aBuf, "---missing-epc-data---");
     }
-    printf("%-32s", aBuf);
+    //printf("%-32s", aBuf);
+    
+    bBuf[0] = '\0';
+    // user-data here
+    for (OpSpecResults = pTagReportData->beginAccessCommandOpSpecResult(); OpSpecResults != pTagReportData->endAccessCommandOpSpecResult(); OpSpecResults++){
+        if( (*OpSpecResults)->m_pType == &CC1G2ReadOpSpecResult::s_typeDescriptor){
+		CC1G2ReadOpSpecResult * pTarget = (CC1G2ReadOpSpecResult *)(*OpSpecResults);
+		llrp_u16v_t  my_u16v;
+		unsigned int n, i;
+		llrp_u16_t * pValue = NULL;
+		my_u16v = pTarget->getReadData();    
+		if(my_u16v.m_nValue > 0 ) {
+		    n = my_u16v.m_nValue;
+		    pValue = my_u16v.m_pValue;
+		    char *ptwo = bBuf;
+		    if (NULL != pValue) {
+		        for (i = 0; i < n; i++) {
+		            if (0 < i && i % 2 == 0) {
+		                *ptwo++ = '-';
+		                }
+                            sprintf(ptwo, "%02X", pValue[i]);
+                            while (*ptwo) ptwo++;
+                        }
+                    }
+                    printf("%-32s %ix16-bit values HEX:%-32s", aBuf, my_u16v.m_nValue, bBuf);
+                } 			
+	}	
+    }
+    
 
     /*
      * End of line
